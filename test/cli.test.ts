@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeLogin, parseArgs, parseCommand } from "../packages/cli/src/args.js";
 import { exactEnvelope, extractFencedEnvelope } from "../packages/cli/src/envelope.js";
 import { decryptWithLocalSshKeys, listLocalSshKeys } from "../packages/cli/src/identity.js";
-import { intersectPublishedKeys, parseRecipientPreference, resolveRecipientKey, serializeRecipientPreference } from "../packages/cli/src/preference.js";
+import { intersectPublishedKeys, parseRecipientPreference, resolveRecipientKey, selectRecipientKey, serializeRecipientPreference, upsertReadmeFooter } from "../packages/cli/src/preference.js";
 import { parseConfirmation } from "../packages/cli/src/program.js";
 import { renderCanonicalIssue } from "../packages/cli/src/renderer.js";
 import { encryptForSsh, sshFingerprint } from "../packages/cli/src/ssh.js";
@@ -49,11 +49,14 @@ describe("zero-ceremony arguments", () => {
     expect(options.message).toBeUndefined();
   });
 
-  it("reserves inbox, read, and set while keeping an explicit username escape hatch", () => {
+  it("reserves block, help, inbox, read, and set while keeping an explicit username escape hatch", () => {
+    expect(parseCommand(["block"])).toEqual({ kind: "block" });
+    expect(parseCommand(["help"])).toEqual({ kind: "help" });
     expect(parseCommand(["inbox"])).toEqual({ kind: "inbox" });
     expect(parseCommand(["read", "6"])).toEqual({ issueNumber: 6, kind: "read" });
     expect(parseCommand(["set"])).toEqual({ kind: "set" });
     expect(parseCommand(["--to", "inbox", "--message", "hi"])).toMatchObject({ kind: "send", options: { login: "inbox", message: "hi" } });
+    expect(parseCommand(["--to", "help", "--message", "hi"])).toMatchObject({ kind: "send", options: { login: "help", message: "hi" } });
   });
 });
 
@@ -70,8 +73,19 @@ describe("recipient key preference", () => {
   it("round-trips the public preference document", () => {
     const encoded = serializeRecipientPreference(secondFingerprint);
     expect(parseRecipientPreference(encoded)).toEqual({ preferredSshFingerprint: secondFingerprint, version: 1 });
+    expect(encoded).toContain("// Public txta.dev receiving preferences. No private keys or messages belong here.");
     expect(() => parseRecipientPreference(JSON.stringify({ extra: "not part of the public contract", preferredSshFingerprint: secondFingerprint, version: 1 })))
-      .toThrow(/Invalid .github\/txta.json/u);
+      .toThrow(/Invalid .github\/txta.jsonc/u);
+    expect(parseRecipientPreference(serializeRecipientPreference(secondFingerprint, { blocked: true })))
+      .toEqual({ blocked: true, preferredSshFingerprint: secondFingerprint, version: 1 });
+  });
+
+  it("adds one neat txta command footer to a profile README", () => {
+    const once = upsertReadmeFooter("# Test fixture\n", "txta-test-user");
+    const twice = upsertReadmeFooter(once, "txta-test-user");
+    expect(once).toContain("npx txtadev txta-test-user");
+    expect(twice).toBe(once);
+    expect(once.match(/<!-- txta.dev:start -->/gu)).toHaveLength(1);
   });
 
   it("requires an explicit yes or no before committing the preference", () => {
@@ -82,9 +96,14 @@ describe("recipient key preference", () => {
   });
 
   it("uses the recipient preference unless the sender explicitly overrides it", () => {
-    expect(resolveRecipientKey(keys, { preferredFingerprint: secondFingerprint, recipient: "Dylan" })).toBe(keys[1]);
-    expect(resolveRecipientKey(keys, { explicitFingerprint: firstFingerprint, preferredFingerprint: secondFingerprint, recipient: "Dylan" })).toBe(keys[0]);
-    expect(() => resolveRecipientKey(keys, { preferredFingerprint: goneFingerprint, recipient: "Dylan" })).toThrow(/npx txtadev set/u);
+    expect(resolveRecipientKey(keys, { preferredFingerprint: secondFingerprint, recipient: "txta-test-user" })).toBe(keys[1]);
+    expect(resolveRecipientKey(keys, { explicitFingerprint: firstFingerprint, preferredFingerprint: secondFingerprint, recipient: "txta-test-user" })).toBe(keys[0]);
+    expect(() => resolveRecipientKey(keys, { preferredFingerprint: goneFingerprint, recipient: "txta-test-user" })).toThrow(/npx txtadev set/u);
+  });
+
+  it("rotates the recipient key without silently removing a block", () => {
+    expect(selectRecipientKey(secondFingerprint, { blocked: true, preferredSshFingerprint: firstFingerprint, version: 1 }))
+      .toEqual({ blocked: true, preferredSshFingerprint: secondFingerprint });
   });
 
   it("offers only public keys whose private half is local", () => {

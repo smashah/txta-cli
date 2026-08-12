@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { Effect } from "effect";
-import { parseRecipientPreference, RECIPIENT_PREFERENCE_PATH, serializeRecipientPreference } from "./preference.js";
+import { LEGACY_RECIPIENT_PREFERENCE_PATH, parseRecipientPreference, RECIPIENT_PREFERENCE_PATH, serializeRecipientPreference, type RecipientPreference } from "./preference.js";
 import { parseSshKey, sshFingerprint } from "./ssh.js";
 
 export class GithubError extends Error {
@@ -61,38 +61,97 @@ type GithubContent = {
   sha: string;
 };
 
-const preferenceEndpoint = (login: string) => `repos/${login}/${login}/contents/${RECIPIENT_PREFERENCE_PATH}`;
+const preferenceEndpoint = (login: string, path = RECIPIENT_PREFERENCE_PATH) => `repos/${login}/${login}/contents/${path}`;
 
-const getPreferenceFile = (login: string) =>
-  runGh(["api", preferenceEndpoint(login)]).pipe(
-    Effect.map((json) => JSON.parse(json) as GithubContent),
+const getPreferenceFileAt = (login: string, path: string) =>
+  runGh(["api", preferenceEndpoint(login, path)]).pipe(
+    Effect.map((json) => ({ ...JSON.parse(json) as GithubContent, path })),
     Effect.catch((error) => /(?:HTTP )?404|Not Found/iu.test(error.message) ? Effect.succeed(undefined) : Effect.fail(error)),
   );
 
-export const getRecipientPreference = (login: string) =>
+export const getRecipientPreferenceState = (login: string, { allowInvalid = false }: { allowInvalid?: boolean } = {}) =>
   Effect.gen(function* () {
-    const file = yield* getPreferenceFile(login);
-    if (!file) return undefined;
+    const [currentFile, legacyFile] = yield* Effect.all([
+      getPreferenceFileAt(login, RECIPIENT_PREFERENCE_PATH),
+      getPreferenceFileAt(login, LEGACY_RECIPIENT_PREFERENCE_PATH),
+    ]);
+    const file = currentFile ?? legacyFile;
+    const legacyExists = legacyFile !== undefined;
+    if (!file) return { file: undefined, legacyExists, preference: undefined };
     try {
-      return parseRecipientPreference(Buffer.from(file.content, file.encoding).toString("utf8"));
+      return {
+        file,
+        legacyExists,
+        preference: parseRecipientPreference(Buffer.from(file.content, file.encoding).toString("utf8")),
+      };
     } catch {
-      return yield* Effect.fail(new GithubError(`@${login}'s ${RECIPIENT_PREFERENCE_PATH} is invalid. Ask them to run npx txtadev set again.`));
+      if (allowInvalid) return { file, legacyExists, preference: undefined };
+      return yield* Effect.fail(new GithubError(`@${login}'s ${file.path} is invalid. Ask them to run npx txtadev set again.`));
     }
   });
 
-export const putRecipientPreference = (login: string, fingerprint: string) =>
+export const getRecipientPreference = (login: string) =>
+  getRecipientPreferenceState(login).pipe(Effect.map((state) => state.preference));
+
+const readmeEndpoint = (login: string) => `repos/${login}/${login}/contents/README.md`;
+
+export const getProfileReadme = (login: string) =>
+  runGh(["api", readmeEndpoint(login)]).pipe(
+    Effect.map((json) => JSON.parse(json) as GithubContent),
+    Effect.map((file) => ({ contents: Buffer.from(file.content, file.encoding).toString("utf8"), sha: file.sha })),
+    Effect.catch((error) => /(?:HTTP )?404|Not Found/iu.test(error.message)
+      ? Effect.succeed({ contents: "", sha: undefined })
+      : Effect.fail(error)),
+  );
+
+export const getProfileHead = (login: string) =>
   Effect.gen(function* () {
-    const current = yield* getPreferenceFile(login);
-    const payload = JSON.stringify({
-      message: "chore: set txta.dev recipient key",
-      content: Buffer.from(serializeRecipientPreference(fingerprint)).toString("base64"),
-      ...(current ? { sha: current.sha } : {}),
-    });
-    const json = yield* runGh(["api", preferenceEndpoint(login), "--method", "PUT", "--input", "-"], payload).pipe(
-      Effect.mapError((error) => new GithubError(`GitHub could not save the txta key preference. ${error.message}`)),
-    );
-    return JSON.parse(json) as { commit: { html_url: string }; content: { html_url: string } };
+    const repository = JSON.parse(yield* runGh(["api", `repos/${login}/${login}`])) as { default_branch: string };
+    const oid = yield* runGh(["api", `repos/${login}/${login}/git/ref/heads/${encodeURIComponent(repository.default_branch)}`, "--jq", ".object.sha"]);
+    return { branch: repository.default_branch, oid };
   });
+
+export const commitProfileFiles = (
+  login: string,
+  { branch, deletions = [], files, message, oid }: { branch: string; deletions?: string[]; files: Array<{ contents: string; path: string }>; message: string; oid: string },
+) => {
+  const query = "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }";
+  const payload = JSON.stringify({
+    query,
+    variables: {
+      input: {
+        branch: { branchName: branch, repositoryNameWithOwner: `${login}/${login}` },
+        expectedHeadOid: oid,
+        fileChanges: {
+          additions: files.map((file) => ({ contents: Buffer.from(file.contents).toString("base64"), path: file.path })),
+          ...(deletions.length > 0 ? { deletions: deletions.map((path) => ({ path })) } : {}),
+        },
+        message: { headline: message },
+      },
+    },
+  });
+  return runGh(["api", "graphql", "--input", "-"], payload).pipe(
+    Effect.mapError((error) => new GithubError(`GitHub could not commit the txta profile changes. ${error.message}`)),
+    Effect.map((json) => (JSON.parse(json) as { data: { createCommitOnBranch: { commit: { url: string } } } }).data.createCommitOnBranch.commit),
+  );
+};
+
+export const updateRecipientPreference = (login: string, update: (current: RecipientPreference | undefined) => Omit<RecipientPreference, "version">) => {
+  const attempt = Effect.gen(function* () {
+    const head = yield* getProfileHead(login);
+    const current = yield* getRecipientPreferenceState(login, { allowInvalid: true });
+    const next = update(current.preference);
+    const contents = serializeRecipientPreference(next.preferredSshFingerprint, next.blocked ? { blocked: true } : {});
+    const commit = yield* commitProfileFiles(login, {
+      ...head,
+      deletions: current.legacyExists ? [LEGACY_RECIPIENT_PREFERENCE_PATH] : [],
+      files: [{ contents, path: RECIPIENT_PREFERENCE_PATH }],
+      message: next.blocked ? "chore: block txta.dev messages" : "chore: update txta.dev settings",
+    });
+    return { commit, preference: { ...next, version: 1 as const } };
+  });
+  return attempt;
+};
 
 export const listInboxIssues = (login: string) =>
   runGh([
@@ -122,11 +181,11 @@ export const getInboxIssue = (login: string, selector: { issueNumber?: number; m
     return JSON.parse(json) as { body: string; number: number; url: string };
   });
 
-export const discoverRecipient = (login: string, { ignorePreference = false }: { ignorePreference?: boolean } = {}) =>
+export const discoverRecipient = (login: string, { ignoreConfig = false }: { ignoreConfig?: boolean } = {}) =>
   Effect.gen(function* () {
     const [sshJson, preference] = yield* Effect.all([
       runGh(["api", `users/${login}/keys`]),
-      ignorePreference ? Effect.succeed(undefined) : getRecipientPreference(login),
+      ignoreConfig ? Effect.succeed(undefined) : getRecipientPreference(login),
     ]);
     const sshApi = JSON.parse(sshJson) as Array<{ id: number; key: string }>;
     const keys: RecipientKey[] = [];
@@ -140,7 +199,8 @@ export const discoverRecipient = (login: string, { ignorePreference = false }: {
     }
     return {
       keys,
-      ...(preference ? { preferredFingerprint: preference.preferredSshFingerprint } : {}),
+      ...(preference?.blocked ? { blocked: true as const } : {}),
+      ...(preference?.preferredSshFingerprint ? { preferredFingerprint: preference.preferredSshFingerprint } : {}),
     };
   });
 

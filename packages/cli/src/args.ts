@@ -8,6 +8,8 @@ export type CliOptions = {
 };
 
 export type CliCommand =
+  | { kind: "block" }
+  | { kind: "help" }
   | { kind: "inbox" }
   | { issueNumber?: number; kind: "read"; messageId?: string }
   | { kind: "set" }
@@ -42,6 +44,14 @@ export function parseArgs(args: string[]): CliOptions {
 }
 
 export function parseCommand(args: string[]): CliCommand {
+  if (args[0] === "help") {
+    if (args.length !== 1) throw new Error("Usage: npx txtadev help");
+    return { kind: "help" };
+  }
+  if (args[0] === "block") {
+    if (args.length !== 1) throw new Error("Usage: npx txtadev block");
+    return { kind: "block" };
+  }
   if (args[0] === "set") {
     if (args.length !== 1) throw new Error("Usage: npx txtadev set");
     return { kind: "set" };

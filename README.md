@@ -12,7 +12,7 @@ The canonical package is also directly runnable:
 npx @txtadev/cli
 ```
 
-The CLI takes a GitHub username and message, uses the first published SSH encryption key GitHub returns, encrypts locally, and creates one immutable issue in the recipient-owned `username/username` profile repository through your authenticated [`gh`](https://cli.github.com/) session. Leave either value out and txta prompts for it; pipe a longer message over standard input if you prefer.
+The CLI takes a GitHub username and message, honors the recipient's chosen SSH encryption key when configured, encrypts locally, and creates one immutable issue in the recipient-owned `username/username` profile repository through your authenticated [`gh`](https://cli.github.com/) session. Leave either value out and txta prompts for it; pipe a longer message over standard input if you prefer.
 
 Read your letters without finding a key filename or installing `age`:
 
@@ -29,7 +29,23 @@ If GitHub publishes several keys, choose the one whose private half is on your c
 npx txtadev set
 ```
 
-`set` intersects GitHub's public SSH keys with the usable private keys in `~/.ssh`, asks you to choose, then commits only the selected fingerprint to `.github/txta.json` in your public `username/username` profile repository. Senders use that preference automatically. The profile repository remains the authenticated source of truth; txta.dev may cache the public fingerprint later, but it never needs your GitHub token or private key.
+`set` intersects GitHub's public SSH keys with the usable private keys in `~/.ssh`, asks you to choose, and offers to add your `npx txtadev <username>` contact command to the footer of your profile README. It shows one final confirmation before committing the selected fingerprint and optional README footer to your public `username/username` profile repository.
+
+The recipient config is the commented JSONC file `.github/txta.jsonc`. It contains only public receiving preferences—never a private key, local path, message, or GitHub token. Senders use the selected fingerprint automatically.
+
+Stop accepting new messages at any time:
+
+```bash
+npx txtadev block
+```
+
+`block` confirms the change, then adds `"blocked": true` to the same public JSONC config. Official txta send paths—including the CLI, website, and generated DIY command—honor that opt-out before accepting a message. Direct GitHub issue creation remains controlled by your repository settings.
+
+Show every command with `npx txtadev help`. The command names `block`, `help`, `inbox`, `read`, and `set` are reserved; reach a GitHub user with one of those names through the explicit escape hatch:
+
+```bash
+npx txtadev --to help "hello"
+```
 
 ## Requirements
 
