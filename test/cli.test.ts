@@ -7,6 +7,7 @@ import { normalizeLogin, parseArgs, parseCommand } from "../packages/cli/src/arg
 import { exactEnvelope, extractFencedEnvelope } from "../packages/cli/src/envelope.js";
 import { decryptWithLocalSshKeys, listLocalSshKeys } from "../packages/cli/src/identity.js";
 import { intersectPublishedKeys, parseRecipientPreference, resolveRecipientKey, serializeRecipientPreference } from "../packages/cli/src/preference.js";
+import { parseConfirmation } from "../packages/cli/src/program.js";
 import { renderCanonicalIssue } from "../packages/cli/src/renderer.js";
 import { encryptForSsh, sshFingerprint } from "../packages/cli/src/ssh.js";
 
@@ -71,6 +72,13 @@ describe("recipient key preference", () => {
     expect(parseRecipientPreference(encoded)).toEqual({ preferredSshFingerprint: secondFingerprint, version: 1 });
     expect(() => parseRecipientPreference(JSON.stringify({ extra: "not part of the public contract", preferredSshFingerprint: secondFingerprint, version: 1 })))
       .toThrow(/Invalid .github\/txta.json/u);
+  });
+
+  it("requires an explicit yes or no before committing the preference", () => {
+    expect(parseConfirmation("")).toBe(true);
+    expect(parseConfirmation("yes")).toBe(true);
+    expect(parseConfirmation("n")).toBe(false);
+    expect(() => parseConfirmation("maybe")).toThrow("Enter y or n.");
   });
 
   it("uses the recipient preference unless the sender explicitly overrides it", () => {

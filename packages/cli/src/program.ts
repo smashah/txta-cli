@@ -52,6 +52,13 @@ const readPipedMessage = () =>
     return Buffer.concat(chunks).toString("utf8").replace(/\n$/u, "");
   });
 
+export function parseConfirmation(value: string) {
+  const answer = value.trim().toLowerCase();
+  if (answer === "" || answer === "y" || answer === "yes") return true;
+  if (answer === "n" || answer === "no") return false;
+  throw new Error("Enter y or n.");
+}
+
 export const sendProgram = (options: CliOptions) =>
   Effect.gen(function* () {
     yield* ensureGithubAuth;
@@ -119,10 +126,19 @@ export const setProgram = Effect.gen(function* () {
   const selectedIndex = answer === "" && matches.length === 1 ? 0 : Number(answer) - 1;
   const selected = matches[selectedIndex];
   if (!selected) return yield* Effect.fail(new Error("Choose a key number from the list above."));
+  const confirmation = yield* prompt(`Commit this preference to github.com/${login}/${login} now? [Y/n]: `);
+  const shouldSave = yield* Effect.try({
+    try: () => parseConfirmation(confirmation),
+    catch: (error) => error instanceof Error ? error : new Error(String(error)),
+  });
+  if (!shouldSave) {
+    console.log("Nothing changed.");
+    return { cancelled: true as const };
+  }
   const saved = yield* putRecipientPreference(login, selected.fingerprint);
   console.log(`Preferred key saved: ${selected.fingerprint}`);
   console.log(`Public config: ${saved.content.html_url}`);
-  return { fingerprint: selected.fingerprint, url: saved.content.html_url };
+  return { cancelled: false as const, fingerprint: selected.fingerprint, url: saved.content.html_url };
 });
 
 export const readProgram = ({ issueNumber, messageId }: { issueNumber?: number; messageId?: string }) =>
