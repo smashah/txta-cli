@@ -31,6 +31,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Version the fixed package pair
         run: pnpm changeset version
+      - name: Sync the release lockfile
+        run: pnpm install --lockfile-only
       - name: Commit the release version
         run: |
           if git diff --quiet; then
