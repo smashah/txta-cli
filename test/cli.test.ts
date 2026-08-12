@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeLogin } from "../packages/cli/src/args.js";
+import { normalizeLogin, parseArgs } from "../packages/cli/src/args.js";
 import { exactEnvelope, extractFencedEnvelope } from "../packages/cli/src/envelope.js";
 import { renderCanonicalIssue } from "../packages/cli/src/renderer.js";
 
@@ -14,6 +14,7 @@ describe("canonical issue", () => {
     expect(body.match(/-----BEGIN AGE ENCRYPTED FILE-----/gu)).toHaveLength(1);
     expect(body).toContain("<!-- txta-id:test-id -->");
     expect(body).toContain("smashah/smashah");
+    expect(body).toContain("https://assets.txta.dev/i/banner-scroll-2efe9030.png");
   });
 
   it("rejects content outside the envelope", () => {
@@ -24,4 +25,16 @@ describe("canonical issue", () => {
 describe("GitHub login", () => {
   it("normalizes an @ prefix", () => expect(normalizeLogin("@smashah")).toBe("smashah"));
   it("rejects invalid usernames", () => expect(() => normalizeLogin("not/a/user")).toThrow(/valid GitHub/u));
+});
+
+describe("zero-ceremony arguments", () => {
+  it("accepts a target followed by a plain message", () => {
+    expect(parseArgs(["smashah", "hi", "from", "txta"])).toMatchObject({ login: "smashah", message: "hi from txta" });
+  });
+
+  it("keeps stdin available when only the target is positional", () => {
+    const options = parseArgs(["smashah"]);
+    expect(options.login).toBe("smashah");
+    expect(options.message).toBeUndefined();
+  });
 });

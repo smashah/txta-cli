@@ -28,13 +28,7 @@ const chooseKey = (keys: RecipientKey[], fingerprint?: string) =>
       if (!selected) return yield* Effect.fail(new Error("The selected key is no longer published. Check the recipient again before sending."));
       return selected;
     }
-    if (keys.length === 1) return keys[0]!;
-    console.log("\nPublished keys:");
-    keys.forEach((key, index) => console.log(`  ${index + 1}. ${key.algorithm}  ${key.fingerprint}`));
-    const answer = yield* prompt("Choose a key: ");
-    const selected = keys[Number.parseInt(answer, 10) - 1];
-    if (!selected) return yield* Effect.fail(new Error("Choose one of the listed keys."));
-    return selected;
+    return keys[0]!;
   });
 
 export const sendProgram = (options: CliOptions) =>

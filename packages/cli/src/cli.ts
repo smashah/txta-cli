@@ -9,12 +9,13 @@ const help = `txta.dev ${packageJson.version}
 Send a locally encrypted letter through your authenticated GitHub CLI.
 
 Usage:
+  npx txtadev <github-login> <message>
+  printf 'a private message' | npx txtadev <github-login>
   npx txtadev
-  npx txtadev --to <github-login> [--fingerprint <SHA256:...>] [--yes]
 
 Options:
   --to <login>          Recipient GitHub username
-  --fingerprint <value> Refuse delivery if the selected key changed
+  --fingerprint <value> Advanced: require one exact published key
   --message <text>      Read the message from an argument instead of the prompt
   --yes                 Post without the final confirmation prompt
   --dry-run             Encrypt and verify the issue without posting

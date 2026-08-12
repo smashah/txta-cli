@@ -1,11 +1,11 @@
 import { exactEnvelope } from "./envelope.js";
 
 export const canonicalAssets = Object.freeze({
-  bannerScroll: "https://raw.githubusercontent.com/smashah/smashah/2efe9030981e69e00bbb9e3247e3366fac23d156/img/txta/banner-scroll.png",
-  ponyExpress: "https://raw.githubusercontent.com/smashah/smashah/d0c3f3777e1c9ebb972eff6dfa8979797e6ddf40/img/txta/pony-express.png",
-  sealedLetter: "https://raw.githubusercontent.com/smashah/smashah/d0c3f3777e1c9ebb972eff6dfa8979797e6ddf40/img/txta/sprite-d.png",
-  signoff: "https://raw.githubusercontent.com/smashah/smashah/d0c3f3777e1c9ebb972eff6dfa8979797e6ddf40/img/txta/sprite-b.png",
-  postmaster: "https://raw.githubusercontent.com/smashah/smashah/d0c3f3777e1c9ebb972eff6dfa8979797e6ddf40/img/txta/sprite-e.png",
+  bannerScroll: "https://assets.txta.dev/i/banner-scroll-2efe9030.png",
+  ponyExpress: "https://assets.txta.dev/i/pony-express-d0c3f377.png",
+  sealedLetter: "https://assets.txta.dev/i/sealed-letter-d0c3f377.png",
+  signoff: "https://assets.txta.dev/i/signoff-d0c3f377.png",
+  postmaster: "https://assets.txta.dev/i/postmaster-d0c3f377.png",
 });
 
 const fence = (language: string, content: string) => [language ? `\`\`\`${language}` : "```", content, "```"].join("\n");
