@@ -45,4 +45,11 @@ jobs:
           git push origin HEAD:main
       - run: pnpm run release
       - name: Push release tags
-        run: git push origin --follow-tags
+        run: |
+          git fetch origin --tags --force
+          cli_version="$(node -p 'require("./packages/cli/package.json").version')"
+          alias_version="$(node -p 'require("./packages/txtadev/package.json").version')"
+          for tag in "@txtadev/cli@${cli_version}" "txtadev@${alias_version}"; do
+            git show-ref --tags --verify --quiet "refs/tags/${tag}" || git tag "${tag}"
+          done
+          git push origin --tags
