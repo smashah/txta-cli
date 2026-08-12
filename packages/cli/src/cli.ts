@@ -17,7 +17,6 @@ Options:
   --to <login>          Recipient GitHub username
   --fingerprint <value> Advanced: require one exact published key
   --message <text>      Read the message from an argument instead of the prompt
-  --yes                 Post without the final confirmation prompt
   --dry-run             Encrypt and verify the issue without posting
   --version             Print the package version
   --help                Show this help

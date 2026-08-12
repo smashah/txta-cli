@@ -5,11 +5,10 @@ export type CliOptions = {
   login?: string;
   message?: string;
   version: boolean;
-  yes: boolean;
 };
 
 export function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = { dryRun: false, help: false, version: false, yes: false };
+  const options: CliOptions = { dryRun: false, help: false, version: false };
   const positional: string[] = [];
   const nextValue = (flag: string, index: number) => {
     const value = args[index];
@@ -20,7 +19,6 @@ export function parseArgs(args: string[]): CliOptions {
     const value = args[index];
     if (value === "--help" || value === "-h") options.help = true;
     else if (value === "--version" || value === "-v") options.version = true;
-    else if (value === "--yes" || value === "-y") options.yes = true;
     else if (value === "--dry-run") options.dryRun = true;
     else if (value === "--to") options.login = nextValue(value, ++index);
     else if (value === "--fingerprint") options.fingerprint = nextValue(value, ++index);

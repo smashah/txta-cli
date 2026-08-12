@@ -60,11 +60,6 @@ export const sendProgram = (options: CliOptions) =>
       return { body, dryRun: true as const };
     }
 
-    if (!options.yes) {
-      const confirmation = yield* prompt(`Post one encrypted issue to ${login}/${login}? [y/N] `);
-      if (!/^y(?:es)?$/iu.test(confirmation.trim())) return yield* Effect.fail(new Error("Send cancelled."));
-    }
-
     const issue = yield* createEncryptedIssue(login, body);
     console.log(`Delivered: ${issue.html_url}`);
     return { dryRun: false as const, issue };
