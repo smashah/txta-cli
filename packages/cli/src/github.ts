@@ -65,7 +65,9 @@ export const discoverRecipient = (login: string) =>
 
 export const ensureRecipientRepository = (login: string) =>
   Effect.gen(function* () {
-    const json = yield* runGh(["api", `repos/${login}/${login}`]);
+    const json = yield* runGh(["api", `repos/${login}/${login}`]).pipe(
+      Effect.mapError((error) => new GithubError(`@${login}'s profile repository is unavailable. Nothing was delivered. ${error.message}`)),
+    );
     const repo = JSON.parse(json) as { archived: boolean; has_issues: boolean; html_url: string };
     if (repo.archived || !repo.has_issues) {
       return yield* Effect.fail(new GithubError(`@${login}'s profile repository cannot receive issues.`));
@@ -76,6 +78,8 @@ export const ensureRecipientRepository = (login: string) =>
 export const createEncryptedIssue = (login: string, body: string) =>
   Effect.gen(function* () {
     const payload = JSON.stringify({ title: "📬 You've got mail", body });
-    const json = yield* runGh(["api", `repos/${login}/${login}/issues`, "--method", "POST", "--input", "-"], payload);
+    const json = yield* runGh(["api", `repos/${login}/${login}/issues`, "--method", "POST", "--input", "-"], payload).pipe(
+      Effect.mapError((error) => new GithubError(`GitHub did not accept the issue. Nothing was delivered. ${error.message}`)),
+    );
     return JSON.parse(json) as { html_url: string; number: number };
   });
