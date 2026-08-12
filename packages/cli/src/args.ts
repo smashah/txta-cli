@@ -10,6 +10,7 @@ export type CliOptions = {
 export type CliCommand =
   | { kind: "inbox" }
   | { issueNumber?: number; kind: "read"; messageId?: string }
+  | { kind: "set" }
   | { kind: "send"; options: CliOptions };
 
 export function parseArgs(args: string[]): CliOptions {
@@ -41,6 +42,10 @@ export function parseArgs(args: string[]): CliOptions {
 }
 
 export function parseCommand(args: string[]): CliCommand {
+  if (args[0] === "set") {
+    if (args.length !== 1) throw new Error("Usage: npx txtadev set");
+    return { kind: "set" };
+  }
   if (args[0] === "inbox") {
     if (args.length !== 1) throw new Error("Usage: npx txtadev inbox");
     return { kind: "inbox" };

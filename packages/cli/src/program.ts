@@ -1,11 +1,13 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Writable } from "node:stream";
+import { homedir } from "node:os";
 import { Effect } from "effect";
 import { normalizeLogin, type CliOptions } from "./args.js";
-import { createEncryptedIssue, discoverRecipient, ensureGithubAuth, ensureRecipientRepository, getGithubViewer, getInboxIssue, listInboxIssues, type RecipientKey } from "./github.js";
+import { createEncryptedIssue, discoverRecipient, ensureGithubAuth, ensureRecipientRepository, getGithubViewer, getInboxIssue, listInboxIssues, putRecipientPreference } from "./github.js";
 import { extractFencedEnvelope, verifyRenderedEnvelope } from "./envelope.js";
-import { decryptWithLocalSshKeys } from "./identity.js";
+import { decryptWithLocalSshKeys, listLocalSshKeys } from "./identity.js";
+import { intersectPublishedKeys, resolveRecipientKey } from "./preference.js";
 import { renderCanonicalIssue } from "./renderer.js";
 import { encryptForSsh } from "./ssh.js";
 
@@ -50,28 +52,22 @@ const readPipedMessage = () =>
     return Buffer.concat(chunks).toString("utf8").replace(/\n$/u, "");
   });
 
-const chooseKey = (keys: RecipientKey[], fingerprint?: string) =>
-  Effect.gen(function* () {
-    if (fingerprint) {
-      const selected = keys.find((key) => key.fingerprint === fingerprint);
-      if (!selected) return yield* Effect.fail(new Error("The selected key is no longer published. Check the recipient again before sending."));
-      return selected;
-    }
-    return keys[0]!;
-  });
-
 export const sendProgram = (options: CliOptions) =>
   Effect.gen(function* () {
     yield* ensureGithubAuth;
     const login = normalizeLogin(options.login ?? (yield* prompt("GitHub username to reach: ")));
-    const discovery = yield* discoverRecipient(login);
+    const discovery = yield* discoverRecipient(login, { ignorePreference: Boolean(options.fingerprint) });
     if (discovery.keys.length === 0) {
-      const gpgNote = discovery.gpgCount > 0
-        ? ` GitHub publishes ${discovery.gpgCount} GPG key${discovery.gpgCount === 1 ? "" : "s"}, but the frozen txta issue transport currently requires SSH Ed25519 or RSA.`
-        : "";
-      return yield* Effect.fail(new Error(`@${login} has no SSH key that txta can encrypt for.${gpgNote}`));
+      return yield* Effect.fail(new Error(`@${login} has no SSH Ed25519 or RSA key that txta can encrypt for.`));
     }
-    const key = yield* chooseKey(discovery.keys, options.fingerprint);
+    const key = yield* Effect.try({
+      try: () => resolveRecipientKey(discovery.keys, {
+        ...(options.fingerprint ? { explicitFingerprint: options.fingerprint } : {}),
+        ...(discovery.preferredFingerprint ? { preferredFingerprint: discovery.preferredFingerprint } : {}),
+        recipient: login,
+      }),
+      catch: (error) => error instanceof Error ? error : new Error(String(error)),
+    });
     console.log(`Recipient: @${login}`);
     console.log(`Key: ${key.algorithm} ${key.fingerprint}`);
 
@@ -93,6 +89,41 @@ export const sendProgram = (options: CliOptions) =>
     console.log(`Delivered: ${issue.html_url}`);
     return { dryRun: false as const, issue };
   });
+
+export const setProgram = Effect.gen(function* () {
+  yield* ensureGithubAuth;
+  const login = yield* getGithubViewer;
+  yield* ensureRecipientRepository(login);
+  const discovery = yield* discoverRecipient(login, { ignorePreference: true });
+  if (discovery.keys.length === 0) {
+    return yield* Effect.fail(new Error(`@${login} has no public SSH Ed25519 or RSA keys on GitHub.`));
+  }
+  const localKeys = yield* Effect.tryPromise({
+    try: () => listLocalSshKeys({
+      expectedFingerprints: discovery.keys.map((key) => key.fingerprint),
+      promptPassphrase,
+      verifyLocked: true,
+    }),
+    catch: (error) => error instanceof Error ? error : new Error(String(error)),
+  });
+  const matches = intersectPublishedKeys(discovery.keys, localKeys);
+  if (matches.length === 0) {
+    return yield* Effect.fail(new Error("None of your supported public GitHub keys has a usable private key in ~/.ssh on this machine."));
+  }
+  console.log(`txta keys for @${login}`);
+  for (const [index, key] of matches.entries()) {
+    const localPath = key.localPath.startsWith(`${homedir()}/`) ? key.localPath.replace(homedir(), "~") : key.localPath;
+    console.log(`${index + 1}.  ${key.algorithm}  ${key.fingerprint}  ${localPath}`);
+  }
+  const answer = (yield* prompt(`Key number to use${matches.length === 1 ? " [1]" : ""}: `)).trim();
+  const selectedIndex = answer === "" && matches.length === 1 ? 0 : Number(answer) - 1;
+  const selected = matches[selectedIndex];
+  if (!selected) return yield* Effect.fail(new Error("Choose a key number from the list above."));
+  const saved = yield* putRecipientPreference(login, selected.fingerprint);
+  console.log(`Preferred key saved: ${selected.fingerprint}`);
+  console.log(`Public config: ${saved.content.html_url}`);
+  return { fingerprint: selected.fingerprint, url: saved.content.html_url };
+});
 
 export const readProgram = ({ issueNumber, messageId }: { issueNumber?: number; messageId?: string }) =>
   Effect.gen(function* () {

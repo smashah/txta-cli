@@ -10,6 +10,7 @@ import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { Decrypter, armor, type Identity, type Stanza } from "age-encryption";
 import type { ParsedKey } from "ssh2";
 import { exactEnvelope } from "./envelope.js";
+import type { LocalSshKey } from "./preference.js";
 
 const require = createRequire(import.meta.url);
 const { utils } = require("ssh2") as typeof import("ssh2");
@@ -164,6 +165,42 @@ async function findLocalKeys(directory: string) {
     }
   }
   return { identities, locked };
+}
+
+export async function listLocalSshKeys({
+  expectedFingerprints,
+  promptPassphrase,
+  sshDirectory = join(homedir(), ".ssh"),
+  verifyLocked = false,
+}: {
+  expectedFingerprints?: string[];
+  promptPassphrase?: (path: string) => Promise<string>;
+  sshDirectory?: string;
+  verifyLocked?: boolean;
+} = {}) {
+  const { identities, locked } = await findLocalKeys(sshDirectory);
+  const keys: LocalSshKey[] = identities.map((identity) => ({
+    fingerprint: identity.fingerprint,
+    locked: false,
+    path: identity.path!,
+  }));
+  for (const candidate of locked) {
+    if (candidate.publishedFingerprint && expectedFingerprints && !expectedFingerprints.includes(candidate.publishedFingerprint)) continue;
+    if (!verifyLocked) {
+      if (candidate.publishedFingerprint) keys.push({ fingerprint: candidate.publishedFingerprint, locked: true, path: candidate.path });
+      continue;
+    }
+    if (!promptPassphrase) continue;
+    const passphrase = await promptPassphrase(candidate.path);
+    if (!passphrase) continue;
+    try {
+      const identity = parseSshPrivateIdentity(candidate.contents, passphrase, candidate.path);
+      keys.push({ fingerprint: identity.fingerprint, locked: true, path: candidate.path });
+    } catch {
+      // A locked key with the wrong passphrase is not a verified local match.
+    }
+  }
+  return [...new Map(keys.map((key) => [key.fingerprint, key])).values()];
 }
 
 export async function decryptWithLocalSshKeys({

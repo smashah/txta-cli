@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { Effect } from "effect";
+import { parseRecipientPreference, RECIPIENT_PREFERENCE_PATH, serializeRecipientPreference } from "./preference.js";
 import { parseSshKey, sshFingerprint } from "./ssh.js";
 
 export class GithubError extends Error {
@@ -53,6 +54,46 @@ export type InboxIssue = {
 
 export const getGithubViewer = runGh(["api", "user", "--jq", ".login"]);
 
+type GithubContent = {
+  content: string;
+  encoding: "base64";
+  html_url: string;
+  sha: string;
+};
+
+const preferenceEndpoint = (login: string) => `repos/${login}/${login}/contents/${RECIPIENT_PREFERENCE_PATH}`;
+
+const getPreferenceFile = (login: string) =>
+  runGh(["api", preferenceEndpoint(login)]).pipe(
+    Effect.map((json) => JSON.parse(json) as GithubContent),
+    Effect.catch((error) => /(?:HTTP )?404|Not Found/iu.test(error.message) ? Effect.succeed(undefined) : Effect.fail(error)),
+  );
+
+export const getRecipientPreference = (login: string) =>
+  Effect.gen(function* () {
+    const file = yield* getPreferenceFile(login);
+    if (!file) return undefined;
+    try {
+      return parseRecipientPreference(Buffer.from(file.content, file.encoding).toString("utf8"));
+    } catch {
+      return yield* Effect.fail(new GithubError(`@${login}'s ${RECIPIENT_PREFERENCE_PATH} is invalid. Ask them to run npx txtadev set again.`));
+    }
+  });
+
+export const putRecipientPreference = (login: string, fingerprint: string) =>
+  Effect.gen(function* () {
+    const current = yield* getPreferenceFile(login);
+    const payload = JSON.stringify({
+      message: "chore: set txta.dev recipient key",
+      content: Buffer.from(serializeRecipientPreference(fingerprint)).toString("base64"),
+      ...(current ? { sha: current.sha } : {}),
+    });
+    const json = yield* runGh(["api", preferenceEndpoint(login), "--method", "PUT", "--input", "-"], payload).pipe(
+      Effect.mapError((error) => new GithubError(`GitHub could not save the txta key preference. ${error.message}`)),
+    );
+    return JSON.parse(json) as { commit: { html_url: string }; content: { html_url: string } };
+  });
+
 export const listInboxIssues = (login: string) =>
   runGh([
     "issue", "list", "--repo", `${login}/${login}`, "--state", "all",
@@ -81,14 +122,13 @@ export const getInboxIssue = (login: string, selector: { issueNumber?: number; m
     return JSON.parse(json) as { body: string; number: number; url: string };
   });
 
-export const discoverRecipient = (login: string) =>
+export const discoverRecipient = (login: string, { ignorePreference = false }: { ignorePreference?: boolean } = {}) =>
   Effect.gen(function* () {
-    const [sshJson, gpgJson] = yield* Effect.all([
+    const [sshJson, preference] = yield* Effect.all([
       runGh(["api", `users/${login}/keys`]),
-      runGh(["api", `users/${login}/gpg_keys`]),
+      ignorePreference ? Effect.succeed(undefined) : getRecipientPreference(login),
     ]);
     const sshApi = JSON.parse(sshJson) as Array<{ id: number; key: string }>;
-    const gpgApi = JSON.parse(gpgJson) as Array<{ revoked: boolean }>;
     const keys: RecipientKey[] = [];
     for (const candidate of sshApi) {
       try {
@@ -98,7 +138,10 @@ export const discoverRecipient = (login: string) =>
         // GitHub also publishes authentication-only key types that stock age cannot decrypt.
       }
     }
-    return { keys, gpgCount: gpgApi.filter((key) => !key.revoked).length };
+    return {
+      keys,
+      ...(preference ? { preferredFingerprint: preference.preferredSshFingerprint } : {}),
+    };
   });
 
 export const ensureRecipientRepository = (login: string) =>

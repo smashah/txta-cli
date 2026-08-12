@@ -10,10 +10,11 @@
   "scripts": {
     "build": "pnpm --filter @txtadev/cli run build",
     "accept:local": "node scripts/accept-local.mjs",
+    "accept:set": "node scripts/accept-set.mjs",
     "check:lockstep": "node scripts/check-lockstep.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm run check:lockstep && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run accept:local",
+    "verify": "pnpm run check:lockstep && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run accept:set && pnpm run accept:local",
     "release": "pnpm run verify && changeset publish"
   },
   "devDependencies": {

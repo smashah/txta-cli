@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeLogin, parseArgs, parseCommand } from "../packages/cli/src/args.js";
 import { exactEnvelope, extractFencedEnvelope } from "../packages/cli/src/envelope.js";
-import { decryptWithLocalSshKeys } from "../packages/cli/src/identity.js";
+import { decryptWithLocalSshKeys, listLocalSshKeys } from "../packages/cli/src/identity.js";
+import { intersectPublishedKeys, parseRecipientPreference, resolveRecipientKey, serializeRecipientPreference } from "../packages/cli/src/preference.js";
 import { renderCanonicalIssue } from "../packages/cli/src/renderer.js";
 import { encryptForSsh, sshFingerprint } from "../packages/cli/src/ssh.js";
 
@@ -47,11 +48,44 @@ describe("zero-ceremony arguments", () => {
     expect(options.message).toBeUndefined();
   });
 
-  it("reserves inbox and read while keeping an explicit username escape hatch", () => {
+  it("reserves inbox, read, and set while keeping an explicit username escape hatch", () => {
     expect(parseCommand(["inbox"])).toEqual({ kind: "inbox" });
     expect(parseCommand(["read", "6"])).toEqual({ issueNumber: 6, kind: "read" });
+    expect(parseCommand(["set"])).toEqual({ kind: "set" });
     expect(parseCommand(["--to", "inbox", "--message", "hi"])).toMatchObject({ kind: "send", options: { login: "inbox", message: "hi" } });
   });
+});
+
+describe("recipient key preference", () => {
+  const firstFingerprint = `SHA256:${"A".repeat(43)}`;
+  const secondFingerprint = `SHA256:${"B".repeat(43)}`;
+  const goneFingerprint = `SHA256:${"C".repeat(43)}`;
+  const localOnlyFingerprint = `SHA256:${"D".repeat(43)}`;
+  const keys = [
+    { algorithm: "ssh-ed25519" as const, fingerprint: firstFingerprint, key: "first" },
+    { algorithm: "ssh-ed25519" as const, fingerprint: secondFingerprint, key: "second" },
+  ];
+
+  it("round-trips the public preference document", () => {
+    const encoded = serializeRecipientPreference(secondFingerprint);
+    expect(parseRecipientPreference(encoded)).toEqual({ preferredSshFingerprint: secondFingerprint, version: 1 });
+    expect(() => parseRecipientPreference(JSON.stringify({ extra: "not part of the public contract", preferredSshFingerprint: secondFingerprint, version: 1 })))
+      .toThrow(/Invalid .github\/txta.json/u);
+  });
+
+  it("uses the recipient preference unless the sender explicitly overrides it", () => {
+    expect(resolveRecipientKey(keys, { preferredFingerprint: secondFingerprint, recipient: "Dylan" })).toBe(keys[1]);
+    expect(resolveRecipientKey(keys, { explicitFingerprint: firstFingerprint, preferredFingerprint: secondFingerprint, recipient: "Dylan" })).toBe(keys[0]);
+    expect(() => resolveRecipientKey(keys, { preferredFingerprint: goneFingerprint, recipient: "Dylan" })).toThrow(/npx txtadev set/u);
+  });
+
+  it("offers only public keys whose private half is local", () => {
+    expect(intersectPublishedKeys(keys, [
+      { fingerprint: secondFingerprint, locked: false, path: "/tmp/second" },
+      { fingerprint: localOnlyFingerprint, locked: false, path: "/tmp/local" },
+    ])).toEqual([{ ...keys[1], localPath: "/tmp/second", locked: false }]);
+  });
+
 });
 
 describe("bundled SSH decryption", () => {
@@ -72,6 +106,8 @@ describe("bundled SSH decryption", () => {
         expectedFingerprint: await sshFingerprint(publicKey),
         sshDirectory: directory,
       })).resolves.toBe("hello from txta");
+      const localKeys = await listLocalSshKeys({ sshDirectory: directory });
+      expect(localKeys.map((key) => key.fingerprint)).toContain(await sshFingerprint(publicKey));
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

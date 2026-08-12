@@ -23,6 +23,14 @@ npx txtadev read 6
 
 `inbox` lists the sealed issues in your GitHub profile repository and asks which issue number to open. `read` extracts that issue's expected key fingerprint, tries the matching key first, then tries every supported private key in `~/.ssh`; it asks for a passphrase only when a locked key needs one.
 
+If GitHub publishes several keys, choose the one whose private half is on your current machine:
+
+```bash
+npx txtadev set
+```
+
+`set` intersects GitHub's public SSH keys with the usable private keys in `~/.ssh`, asks you to choose, then commits only the selected fingerprint to `.github/txta.json` in your public `username/username` profile repository. Senders use that preference automatically. The profile repository remains the authenticated source of truth; txta.dev may cache the public fingerprint later, but it never needs your GitHub token or private key.
+
 ## Requirements
 
 - Node.js 22 or newer
