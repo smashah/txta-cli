@@ -1,0 +1,34 @@
+{
+  "name": "txtadev",
+  "version": "0.1.0",
+  "description": "Run txta.dev from npx",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "txtadev": "bin/txtadev.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smashah/txta-cli.git",
+    "directory": "packages/txtadev"
+  },
+  "homepage": "https://txta.dev",
+  "bugs": {
+    "url": "https://github.com/smashah/txta-cli/issues"
+  },
+  "dependencies": {
+    "@txtadev/cli": "workspace:0.1.0"
+  }
+}

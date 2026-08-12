@@ -1,0 +1,26 @@
+{
+  "name": "txta-cli-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @txtadev/cli run build",
+    "accept:local": "node scripts/accept-local.mjs",
+    "check:lockstep": "node scripts/check-lockstep.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm run check:lockstep && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run accept:local",
+    "release": "pnpm run verify && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.8",
+    "@types/node": "^24.10.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
