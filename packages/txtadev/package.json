@@ -1,6 +1,6 @@
 {
   "name": "txtadev",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run txta.dev from npx",
   "license": "MIT",
   "type": "module",
@@ -29,6 +29,6 @@
     "url": "https://github.com/smashah/txta-cli/issues"
   },
   "dependencies": {
-    "@txtadev/cli": "workspace:0.1.0"
+    "@txtadev/cli": "workspace:0.1.1"
   }
 }
