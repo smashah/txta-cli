@@ -45,7 +45,7 @@ importers:
   packages/txtadev:
     dependencies:
       '@txtadev/cli':
-        specifier: workspace:0.0.0
+        specifier: workspace:0.1.0
         version: link:../cli
 
 packages:
