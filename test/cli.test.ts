@@ -1,7 +1,13 @@
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeLogin, parseArgs } from "../packages/cli/src/args.js";
+import { normalizeLogin, parseArgs, parseCommand } from "../packages/cli/src/args.js";
 import { exactEnvelope, extractFencedEnvelope } from "../packages/cli/src/envelope.js";
+import { decryptWithLocalSshKeys } from "../packages/cli/src/identity.js";
 import { renderCanonicalIssue } from "../packages/cli/src/renderer.js";
+import { encryptForSsh, sshFingerprint } from "../packages/cli/src/ssh.js";
 
 const envelope = `-----BEGIN AGE ENCRYPTED FILE-----
 YWdlLWVuY3J5cHRpb24ub3JnL3Yx
@@ -13,8 +19,11 @@ describe("canonical issue", () => {
     expect(extractFencedEnvelope(body)).toBe(envelope);
     expect(body.match(/-----BEGIN AGE ENCRYPTED FILE-----/gu)).toHaveLength(1);
     expect(body).toContain("<!-- txta-id:test-id -->");
-    expect(body).toContain("smashah/smashah");
+    expect(body).toContain("Sealed for **@smashah**");
     expect(body).toContain("https://assets.txta.dev/i/banner-scroll-2efe9030.png");
+    expect(body).toContain("npx txtadev read --id test-id");
+    expect(body).not.toContain("age -d");
+    expect(body).not.toContain("~/.ssh/id_ed25519");
   });
 
   it("rejects content outside the envelope", () => {
@@ -36,5 +45,60 @@ describe("zero-ceremony arguments", () => {
     const options = parseArgs(["smashah"]);
     expect(options.login).toBe("smashah");
     expect(options.message).toBeUndefined();
+  });
+
+  it("reserves inbox and read while keeping an explicit username escape hatch", () => {
+    expect(parseCommand(["inbox"])).toEqual({ kind: "inbox" });
+    expect(parseCommand(["read", "6"])).toEqual({ issueNumber: 6, kind: "read" });
+    expect(parseCommand(["--to", "inbox", "--message", "hi"])).toMatchObject({ kind: "send", options: { login: "inbox", message: "hi" } });
+  });
+});
+
+describe("bundled SSH decryption", () => {
+  it("tries every local private key and opens with the matching one", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "txta-keys-"));
+    try {
+      const decoy = join(directory, "decoy");
+      const matching = join(directory, "matching");
+      for (const path of [decoy, matching]) {
+        const generated = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", path]);
+        expect(generated.status, generated.stderr.toString()).toBe(0);
+      }
+      const publicKey = await readFile(`${matching}.pub`, "utf8");
+      const ciphertext = await encryptForSsh("hello from txta", publicKey);
+
+      await expect(decryptWithLocalSshKeys({
+        ciphertext,
+        expectedFingerprint: await sshFingerprint(publicKey),
+        sshDirectory: directory,
+      })).resolves.toBe("hello from txta");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("prompts only when a matching private key is locked", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "txta-locked-key-"));
+    try {
+      const matching = join(directory, "locked");
+      const generated = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "secret", "-f", matching]);
+      expect(generated.status, generated.stderr.toString()).toBe(0);
+      const publicKey = await readFile(`${matching}.pub`, "utf8");
+      const ciphertext = await encryptForSsh("locked letter", publicKey);
+      const prompted: string[] = [];
+
+      await expect(decryptWithLocalSshKeys({
+        ciphertext,
+        expectedFingerprint: await sshFingerprint(publicKey),
+        promptPassphrase: async (path) => {
+          prompted.push(path);
+          return "secret";
+        },
+        sshDirectory: directory,
+      })).resolves.toBe("locked letter");
+      expect(prompted).toEqual([matching]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });

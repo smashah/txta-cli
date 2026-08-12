@@ -3,6 +3,10 @@ name: Release npm packages
 on:
   workflow_dispatch:
 
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
   id-token: write
@@ -25,4 +29,18 @@ jobs:
           npm_version="$(npm --version)"
           node -e 'const [major,minor,patch]=process.argv[1].split(".").map(Number); if (major < 11 || (major === 11 && minor < 5) || (major === 11 && minor === 5 && patch < 1)) process.exit(1)' "$npm_version"
       - run: pnpm install --frozen-lockfile
+      - name: Version the fixed package pair
+        run: pnpm changeset version
+      - name: Commit the release version
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "chore: version npm packages"
+          git push origin HEAD:main
       - run: pnpm run release
+      - name: Push release tags
+        run: git push origin --follow-tags

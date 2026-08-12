@@ -1,11 +1,13 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { Writable } from "node:stream";
 import { Effect } from "effect";
 import { normalizeLogin, type CliOptions } from "./args.js";
-import { createEncryptedIssue, discoverRecipient, ensureGithubAuth, ensureRecipientRepository, type RecipientKey } from "./github.js";
+import { createEncryptedIssue, discoverRecipient, ensureGithubAuth, ensureRecipientRepository, getGithubViewer, getInboxIssue, listInboxIssues, type RecipientKey } from "./github.js";
+import { extractFencedEnvelope, verifyRenderedEnvelope } from "./envelope.js";
+import { decryptWithLocalSshKeys } from "./identity.js";
 import { renderCanonicalIssue } from "./renderer.js";
 import { encryptForSsh } from "./ssh.js";
-import { verifyRenderedEnvelope } from "./envelope.js";
 
 const prompt = (question: string) =>
   Effect.acquireUseRelease(
@@ -13,6 +15,33 @@ const prompt = (question: string) =>
     (terminal) => Effect.promise(() => terminal.question(question)),
     (terminal) => Effect.sync(() => terminal.close()),
   );
+
+const promptPassphrase = async (path: string) => {
+  if (!stdin.isTTY) return "";
+  let muted = false;
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      if (!muted) stdout.write(chunk);
+      callback();
+    },
+  });
+  const terminal = createInterface({ input: stdin, output, terminal: true });
+  const answer = terminal.question(`Passphrase for ${path} (leave blank to skip): `);
+  muted = true;
+  try {
+    return await answer;
+  } finally {
+    muted = false;
+    terminal.close();
+    stdout.write("\n");
+  }
+};
+
+const fingerprintFromIssue = (body: string) => {
+  const match = body.match(/SHA256:[A-Za-z\d+/]+/u);
+  if (!match) throw new Error("The sealed letter does not name its recipient key fingerprint.");
+  return match[0];
+};
 
 const readPipedMessage = () =>
   Effect.promise(async () => {
@@ -64,3 +93,36 @@ export const sendProgram = (options: CliOptions) =>
     console.log(`Delivered: ${issue.html_url}`);
     return { dryRun: false as const, issue };
   });
+
+export const readProgram = ({ issueNumber, messageId }: { issueNumber?: number; messageId?: string }) =>
+  Effect.gen(function* () {
+    yield* ensureGithubAuth;
+    const login = yield* getGithubViewer;
+    const issue = yield* getInboxIssue(login, { ...(issueNumber === undefined ? {} : { issueNumber }), ...(messageId === undefined ? {} : { messageId }) });
+    const ciphertext = extractFencedEnvelope(issue.body);
+    const expectedFingerprint = fingerprintFromIssue(issue.body);
+    const plaintext = yield* Effect.tryPromise({
+      try: () => decryptWithLocalSshKeys({ ciphertext, expectedFingerprint, promptPassphrase }),
+      catch: (error) => error instanceof Error ? error : new Error(String(error)),
+    });
+    console.log(plaintext);
+    return { issue, plaintext };
+  });
+
+export const inboxProgram = Effect.gen(function* () {
+  yield* ensureGithubAuth;
+  const login = yield* getGithubViewer;
+  const issues = yield* listInboxIssues(login);
+  if (issues.length === 0) return yield* Effect.fail(new Error("Your txta inbox is empty."));
+  console.log(`txta inbox for @${login}`);
+  for (const issue of issues) {
+    const date = new Date(issue.createdAt).toLocaleDateString();
+    console.log(`#${issue.number}  ${date}  from @${issue.author?.login ?? "unknown"}`);
+  }
+  const answer = yield* prompt("Issue number to open: ");
+  const issueNumber = Number(answer.replace(/^#/u, ""));
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0 || !issues.some((issue) => issue.number === issueNumber)) {
+    return yield* Effect.fail(new Error("Choose an issue number from the inbox above."));
+  }
+  return yield* readProgram({ issueNumber });
+});

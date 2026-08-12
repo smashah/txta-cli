@@ -7,6 +7,11 @@ export type CliOptions = {
   version: boolean;
 };
 
+export type CliCommand =
+  | { kind: "inbox" }
+  | { issueNumber?: number; kind: "read"; messageId?: string }
+  | { kind: "send"; options: CliOptions };
+
 export function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = { dryRun: false, help: false, version: false };
   const positional: string[] = [];
@@ -33,6 +38,35 @@ export function parseArgs(args: string[]): CliOptions {
   if (!options.login && positional.length > 0) options.login = positional.shift()!;
   if (!options.message && positional.length > 0) options.message = positional.join(" ");
   return options;
+}
+
+export function parseCommand(args: string[]): CliCommand {
+  if (args[0] === "inbox") {
+    if (args.length !== 1) throw new Error("Usage: npx txtadev inbox");
+    return { kind: "inbox" };
+  }
+  if (args[0] === "read") {
+    let issueNumber: number | undefined;
+    let messageId: string | undefined;
+    for (let index = 1; index < args.length; index += 1) {
+      const value = args[index];
+      if (value === "--id") {
+        messageId = args[++index];
+        if (!messageId || messageId.startsWith("-")) throw new Error("--id requires a message ID.");
+      } else if (/^\d+$/u.test(value ?? "") && issueNumber === undefined) {
+        issueNumber = Number(value);
+      } else {
+        throw new Error("Usage: npx txtadev read [issue-number] [--id message-id]");
+      }
+    }
+    if (issueNumber !== undefined && messageId !== undefined) throw new Error("Choose an issue number or --id, not both.");
+    return {
+      kind: "read",
+      ...(issueNumber === undefined ? {} : { issueNumber }),
+      ...(messageId === undefined ? {} : { messageId }),
+    };
+  }
+  return { kind: "send", options: parseArgs(args) };
 }
 
 export const normalizeLogin = (value: string) => {

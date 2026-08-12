@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { Effect } from "effect";
 import packageJson from "../package.json" with { type: "json" };
-import { parseArgs } from "./args.js";
-import { sendProgram } from "./program.js";
+import { parseCommand } from "./args.js";
+import { inboxProgram, readProgram, sendProgram } from "./program.js";
 
 const help = `txta.dev ${packageJson.version}
 
@@ -10,8 +10,15 @@ Send a locally encrypted letter through your authenticated GitHub CLI.
 
 Usage:
   npx txtadev <github-login> <message>
-  printf 'a private message' | npx txtadev <github-login>
+  printf 'a secure message' | npx txtadev <github-login>
   npx txtadev
+  npx txtadev inbox
+  npx txtadev read [issue-number]
+
+Reserved names:
+  inbox                    List sealed issues and choose one to open
+  read                     Open the latest or selected sealed issue
+  --to inbox <message>     Send to a GitHub user whose name is reserved
 
 Options:
   --to <login>          Recipient GitHub username
@@ -23,10 +30,12 @@ Options:
 `;
 
 export async function main(args = process.argv.slice(2)) {
-  const options = parseArgs(args);
-  if (options.help) return console.log(help);
-  if (options.version) return console.log(packageJson.version);
-  await Effect.runPromise(sendProgram(options));
+  const command = parseCommand(args);
+  if (command.kind === "send" && command.options.help) return console.log(help);
+  if (command.kind === "send" && command.options.version) return console.log(packageJson.version);
+  if (command.kind === "inbox") return Effect.runPromise(inboxProgram);
+  if (command.kind === "read") return Effect.runPromise(readProgram(command));
+  await Effect.runPromise(sendProgram(command.options));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -43,6 +43,44 @@ const runGh = (args: string[], input?: string) =>
 
 export const ensureGithubAuth = runGh(["auth", "status"]);
 
+export type InboxIssue = {
+  author: { login: string } | null;
+  createdAt: string;
+  number: number;
+  title: string;
+  url: string;
+};
+
+export const getGithubViewer = runGh(["api", "user", "--jq", ".login"]);
+
+export const listInboxIssues = (login: string) =>
+  runGh([
+    "issue", "list", "--repo", `${login}/${login}`, "--state", "all",
+    "--search", "txta-id: in:body", "--limit", "100",
+    "--json", "author,createdAt,number,title,url",
+  ]).pipe(Effect.map((json) => JSON.parse(json) as InboxIssue[]));
+
+export const getInboxIssue = (login: string, selector: { issueNumber?: number; messageId?: string }) =>
+  Effect.gen(function* () {
+    let issueNumber = selector.issueNumber;
+    if (issueNumber === undefined) {
+      const issues = yield* listInboxIssues(login);
+      const selected = selector.messageId
+        ? yield* runGh([
+            "issue", "list", "--repo", `${login}/${login}`, "--state", "all",
+            "--search", `txta-id:${selector.messageId} in:body`, "--limit", "1", "--json", "number",
+          ]).pipe(Effect.map((json) => (JSON.parse(json) as Array<{ number: number }>)[0]))
+        : issues[0];
+      if (!selected) return yield* Effect.fail(new GithubError(selector.messageId ? "That sealed letter was not found." : "Your txta inbox is empty."));
+      issueNumber = selected.number;
+    }
+    const json = yield* runGh([
+      "issue", "view", String(issueNumber), "--repo", `${login}/${login}`,
+      "--json", "body,number,url",
+    ]);
+    return JSON.parse(json) as { body: string; number: number; url: string };
+  });
+
 export const discoverRecipient = (login: string) =>
   Effect.gen(function* () {
     const [sshJson, gpgJson] = yield* Effect.all([

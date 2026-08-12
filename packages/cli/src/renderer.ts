@@ -23,12 +23,7 @@ export function renderCanonicalIssue({
 }) {
   const envelope = exactEnvelope(ciphertext);
   const marker = `txta-id:${messageId}`;
-  const repo = `${recipient}/${recipient}`;
-  const decryptCommand = [
-    `gh issue view "$(gh issue list --repo ${repo} --state all --search '${marker} in:body' --json number --jq '.[0].number')" -R ${repo} --json body -q .body \\`,
-    "  | awk '/^-----BEGIN AGE/{f=1} f{print} /^-----END AGE/{exit}' \\",
-    "  | age -d -i ~/.ssh/id_ed25519",
-  ].join("\n");
+  const decryptCommand = `npx txtadev read --id ${messageId}`;
 
   return [
     `<!-- ${marker} -->`,
@@ -39,7 +34,7 @@ export function renderCanonicalIssue({
     "# 📬 You've got mail",
     `### Sealed for **@${recipient}** — and only @${recipient}`,
     "",
-    "Someone wanted to reach you badly enough to write this where they knew you'd see it, and privately enough that no one else ever will. It was encrypted **in their browser**, to the key you already publish. We couriered a locked box.",
+    "Someone wanted to reach you badly enough to write this where they knew you'd see it, and securely enough that only the matching private key can open it. It was encrypted **on their machine**, to the key you already publish. We couriered a locked box.",
     "",
     '<br clear="all">',
     "",
@@ -50,8 +45,8 @@ export function renderCanonicalIssue({
     `<img src="${canonicalAssets.ponyExpress}" width="96" align="left" alt="">`,
     "",
     "&nbsp;",
-    '<sub>missing `age`? → `brew install age` &nbsp;·&nbsp; no `gh`? open the sealed letter below, copy it, `pbpaste | age -d -i ~/.ssh/id_ed25519`<br>',
-    `wrong key? \`ssh-keygen -lf ~/.ssh/id_ed25519.pub\` should print<br>\`${fingerprint}\`</sub>`,
+    '<sub>txta checks every private key in `~/.ssh` and asks only when a locked key needs its passphrase.<br>',
+    `no match? you need the private half of<br>\`${fingerprint}\` from the machine or backup where it was created.</sub>`,
     "",
     '<br clear="all">',
     "",
